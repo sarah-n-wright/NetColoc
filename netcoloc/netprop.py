@@ -35,6 +35,7 @@ def get_normalized_adjacency_matrix(graph, conserve_heat=True, weighted=False):
     :return: Square normalized adjacency matrix
     :rtype: :py:class:`numpy.ndarray`
     """
+    assert 0 not in dict(graph.degree).values(), "Graph cannot have nodes with degree=zero"
     # Create graph
     if conserve_heat:
         # If conserving heat, make G_weighted a di-graph (not symmetric)
@@ -51,25 +52,25 @@ def get_normalized_adjacency_matrix(graph, conserve_heat=True, weighted=False):
         v2 = e[1]
         deg1 = node_to_degree_dict[v1]
         deg2 = node_to_degree_dict[v2]
-        
+
         if weighted:
             weight = e[2]['weight']
         else:
             weight = 1
-        
+
         if conserve_heat:
             edge_weights.append((v1, v2, weight / float(deg2)))
             edge_weights.append((v2, v1, weight / float(deg1)))
         else:
             edge_weights.append((v1, v2, weight / np.sqrt(deg1 * deg2)))
-    
+
     # Apply edge weights to graph
     graph_weighted.add_weighted_edges_from(edge_weights)
-    
+
     # Transform graph to adjacency matrix
     w_prime = nx.to_numpy_matrix(graph_weighted, nodelist=graph.nodes())
     w_prime = np.array(w_prime)
-    
+
     return w_prime
 
 
@@ -90,8 +91,9 @@ def get_individual_heats_matrix(normalized_adjacency_matrix, alpha=0.5):
     :return: square individual heats matrix
     :rtype: :py:class:`numpy.ndarray`
     """
+    assert 1 >= alpha >= 0, "Alpha must be between 0 and 1"
     return np.linalg.inv(
-        np.identity(normalized_adjacency_matrix.shape[0]) 
+        np.identity(normalized_adjacency_matrix.shape[0])
         - alpha * normalized_adjacency_matrix
     ) * (1 - alpha)
 
