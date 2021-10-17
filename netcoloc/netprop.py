@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 
-'''Functions for performing network propagation
-'''
+"""
+Functions for performing network propagation
+"""
 
 # External library imports
 import networkx as nx
 import numpy as np
 import pandas as pd
+import warnings
 
 
 def __init__(self):
@@ -39,12 +41,15 @@ def get_normalized_adjacency_matrix(graph, conserve_heat=True, weighted=False):
     # Create graph
     if conserve_heat:
         # If conserving heat, make G_weighted a di-graph (not symmetric)
-        graph_weighted= nx.DiGraph()
+        graph_weighted = nx.DiGraph()
     else:
         # If not conserving heat, make G_weighted a simple graph (symmetric)
         graph_weighted = nx.Graph()
 
-    #Create edge weights
+    if weighted and not nx.is_weighted(G=graph):
+        warnings.warn("Input graph is not weighted. All edge weights will be set to 1.")
+
+    # Create edge weights
     edge_weights = []
     node_to_degree_dict = dict(graph.degree)
     for e in graph.edges(data=True):
@@ -59,17 +64,17 @@ def get_normalized_adjacency_matrix(graph, conserve_heat=True, weighted=False):
             weight = 1
 
         if conserve_heat:
-            edge_weights.append((v1, v2, weight / float(deg2)))
-            edge_weights.append((v2, v1, weight / float(deg1)))
+            # created asymmetrically weighted edges - each directed edge u->v normalized by the degree of u
+            edge_weights.append((v1, v2, weight / float(deg1)))
+            edge_weights.append((v2, v1, weight / float(deg2)))
         else:
             edge_weights.append((v1, v2, weight / np.sqrt(deg1 * deg2)))
 
     # Apply edge weights to graph
     graph_weighted.add_weighted_edges_from(edge_weights)
 
-    # Transform graph to adjacency matrix
-    w_prime = nx.to_numpy_matrix(graph_weighted, nodelist=graph.nodes())
-    w_prime = np.array(w_prime)
+    # Transform graph to adjacency matrix in form of numpy array
+    w_prime = nx.to_numpy_array(graph_weighted, nodelist=graph.nodes())
 
     return w_prime
 
@@ -92,9 +97,13 @@ def get_individual_heats_matrix(normalized_adjacency_matrix, alpha=0.5):
     :rtype: :py:class:`numpy.ndarray`
     """
     assert 1 >= alpha >= 0, "Alpha must be between 0 and 1"
+    # adjacency matrix must be transposed to allow compatibility of asymmetric
+    # matrix from networkx with network propagation formula
+    normalized_adjacency_matrix_transpose = np.transpose(normalized_adjacency_matrix)
+    # Alternatively, the formula could be rearranged.
     return np.linalg.inv(
-        np.identity(normalized_adjacency_matrix.shape[0])
-        - alpha * normalized_adjacency_matrix
+        np.identity(normalized_adjacency_matrix_transpose.shape[0])
+        - alpha * normalized_adjacency_matrix_transpose
     ) * (1 - alpha)
 
 
@@ -132,10 +141,10 @@ def network_propagation(individual_heats_matrix, nodes, seed_genes):
 
     # Add up resulting heats from each gene in seed genes set
     for gene in seed_genes:
-        F += individual_heats_matrix[:,nodes.index(gene)]
+        F += individual_heats_matrix[:, nodes.index(gene)]
 
     # Normalize results by number of seed genes
     F /= len(seed_genes)
 
-    #Return as pandas series
+    # Return as pandas series
     return pd.Series(F, index=nodes)
