@@ -327,3 +327,83 @@ def transform_edges(G, method='cosine_sim', edge_weight_threshold=0.95):
                 str(len(G_transform.edges())))
 
     return G_transform
+
+
+def calculate_mean_z_score_distribution(z1, z2, num_reps, zero_double_negatives=False,
+                                        overlap_control="remove", seed1=None, seed2=None):
+    """
+    Calculates the mean colocalization score (z1 * z2) over all genes for observed data and randomly permuted data.
+    :param z1: z_scores for all genes for trait 1
+    :type z1: :py:class: `pandas.DataFrame`
+    :param z2: z_scores for all genes for trait 2
+    :type z2: :py:class: `pandas.DataFrame`
+    :param num_reps: Number of permutations to perform
+    :type num_reps: int
+    :param zero_double_negatives: Should genes receiving a negative zscore in both traits be zeroed out before
+        calculating colocalization?
+    :type zero_double_negatives: bool
+    :param overlap_control: How should overlapping seed genes be accounted for when calculating expected overlap?
+        None = no control
+        "remove" = exclude overlapping seed genes from the analysis
+        "bin" = bin all genes into "overlapping seed genes" and "all other genes" and calculate expectation for both
+                bins separately
+    :type overlap_control: str or None
+    :param seed1: List of seed genes for trait 1
+    :type seed1: list
+    :param seed2: List of seed genes for trait 2
+    :type seed2: list
+    :returns: observed mean coloc score, array of means of permuted coloc scores
+    """
+    z1z2 = z1.join(z2, lsuffix="1", rsuffix="2")
+    z1z2 = z1z2.assign(zz=z1z2.z1 * z1z2.z2)
+    overlap_z1 = None
+    if overlap_control == "remove":
+        seed_overlap = list(set(seed1).intersection(set(seed2)))
+        print("Overlap seed genes:", len(seed_overlap))
+        z1z2.drop(seed_overlap, axis=0, inplace=True)
+    elif overlap_control == "bin":
+        seed_overlap = list(set(seed1).intersection(set(seed2)))
+        print("Overlap seed genes:", len(seed_overlap))
+        overlap_z1z2 = z1z2.loc[seed_overlap]
+        overlap_z1 = np.array(overlap_z1z2.z1)
+        z1z2.drop(seed_overlap, axis=0, inplace=True)
+    z1 = np.array(z1z2.z1)
+    z2 = np.array(z1z2.z2)
+    if zero_double_negatives:
+        for node in z1z2.index:
+            if (z1z2.loc[node].z1 < 0) and (z1z2.loc[node].z2 < 0):
+                z1z2.loc[node, 'zz'] = 0
+    permutation_means = np.zeros(num_reps)
+    for i in tqdm(range(num_reps)):
+        perm_z1z2 = np.zeros(len(z1))
+        np.random.shuffle(z1)
+
+        for node in range(len(z1)):
+            if not zero_double_negatives or not (z1[node] < 0 and z2[node] < 0):
+                perm_z1z2[node] = z1[node] * z2[node]
+            else:
+                perm_z1z2[node] = 0
+        if overlap_control == "bin":
+            overlap_perm_z1z2 = np.zeros(len(overlap_z1))
+            np.random.shuffle(overlap_z1)
+            for node in range(len(overlap_z1)):
+                if zero_double_negatives and (overlap_z1[node] < 0 and z2[node] < 0):
+                    overlap_perm_z1z2[node] = 0
+                else:
+                    overlap_perm_z1z2[node] = overlap_z1[node] * z2[node]
+            perm_z1z2 = np.concatenate([perm_z1z2, overlap_perm_z1z2])
+
+        permutation_means[i] = np.mean(perm_z1z2)
+    return np.mean(z1z2.zz), permutation_means
+
+
+def get_p_from_permutation_results(observed, permuted):
+    """
+    Calculates the significance of the observed mean relative to the empirical normal distribution of permuted means.
+    :param observed: observed value
+    :param permuted: vector of values from permutation
+    :returns: p value of observed based on zscore of permutation distribution
+    """
+    p = norm.sf((observed-np.mean(permuted))/np.std(permuted))
+    p = round(p, 4 - int(math.floor(math.log10(abs(p)))) - 1)
+    return p
