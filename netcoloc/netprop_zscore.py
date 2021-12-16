@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-'''Functions for getting z-scores from network propagation.
-'''
+"""Functions for getting z-scores from network propagation.
+"""
 
 # External library imports
 
@@ -12,10 +12,6 @@ import ndex2
 # Internal module convenience imports
 from netcoloc.netcoloc_utils import *
 from netcoloc.netprop import *
-
-
-def __init__(self):
-    pass
 
 
 def netprop_zscore(seed_gene_file, seed_gene_file_delimiter=None, num_reps=10, alpha=0.5, minimum_bin_size=10,
@@ -98,12 +94,12 @@ def netprop_zscore(seed_gene_file, seed_gene_file_delimiter=None, num_reps=10, a
 
     # seed_gene_file
     seed_gene_file = os.path.abspath(seed_gene_file)
-    #num_reps
+    # num_reps
     try:
         num_reps = int(num_reps)
-    except:
+    except TypeError:
         raise TypeError("The num_reps argument should be an integer")
-    #int_file and int_uuid
+    # int_file and int_uuid
     if interactome_file is None and interactome_uuid is None:
         raise TypeError("Either interactome_file or interactome_uuid argument must be provided")
 
@@ -112,7 +108,7 @@ def netprop_zscore(seed_gene_file, seed_gene_file_delimiter=None, num_reps=10, a
         print('Loading interactome')
     if interactome_file is not None:
         interactome_file = os.path.abspath(interactome_file)
-        interactome = nx.Graph()
+        # interactome = nx.Graph()
         interactome = nx.read_gpickle(interactome_file)
     else:
         interactome = ndex2.create_nice_cx_from_server(
@@ -153,13 +149,12 @@ def netprop_zscore(seed_gene_file, seed_gene_file_delimiter=None, num_reps=10, a
         dict(interactome.degree),
         seed_genes,
         num_reps=num_reps,
-        alpha=alpha,
         minimum_bin_size=minimum_bin_size)
 
     # Save z-score results
     z_scores.name = 'z-scores'
     if save_z_scores:
-      z_scores.to_csv(out_name + '_z_scores_' + str(num_reps) + '_reps.tsv', sep='\t')
+        z_scores.to_csv(out_name + '_z_scores_' + str(num_reps) + '_reps.tsv', sep='\t')
 
     # If save_final_heat is true, save out the final heat vector
     if save_final_heat:
@@ -178,7 +173,8 @@ def netprop_zscore(seed_gene_file, seed_gene_file_delimiter=None, num_reps=10, a
     return z_scores, random_final_heats
 
 
-def calculate_heat_zscores(individual_heats_matrix, nodes, degrees, seed_genes, num_reps=10, alpha=0.5, minimum_bin_size=10,random_seed=1):
+def calculate_heat_zscores(individual_heats_matrix, nodes, degrees, seed_genes, num_reps=10,
+                           minimum_bin_size=10, random_seed=1):
     """
     Helper function to perform network heat propagation using the given
     individual heats matrix with the given seed genes and return the z-scores of
@@ -192,7 +188,8 @@ def calculate_heat_zscores(individual_heats_matrix, nodes, degrees, seed_genes, 
 
     * :py:class:`pandas.Series` containing z-scores for each gene. Gene names comprise the index column
     * :py:class:`pandas.Series` containing the final heat scores for each gene. Gene names comprise the index column,
-    * :py:class:`numpy.ndarray` containing square matrix in which each row contains the final heat scores for each gene from a network propagation from random seed genes)
+    * :py:class:`numpy.ndarray` containing square matrix in which each row contains the final heat scores for each gene
+    from a network propagation from random seed genes)
 
     :param individual_heats_matrix: output of the
             netprop.get_individual_heats_matrix. A square matrix containing the
@@ -211,11 +208,6 @@ def calculate_heat_zscores(individual_heats_matrix, nodes, degrees, seed_genes, 
     :param num_reps: Number of times the network propagation algorithm should
             be run using random seed genes in order to build the null model
     :type num_reps: int
-    :param alpha: Number between 0 and 1. Denotes the importance of the
-            propagation step in the network propagation, as opposed to the step
-            where heat is added to seed genes only. Recommended to be 0.5 or
-            greater
-    :type alpha: float
     :param minimum_bin_size: minimum number of genes that should be in
             each degree matching bin
     :type minimum_bin_size: int
@@ -256,13 +248,79 @@ def calculate_heat_zscores(individual_heats_matrix, nodes, degrees, seed_genes, 
         # Perform network propagation with random seed genes
         random_final_heat = network_propagation(individual_heats_matrix, nodes, random_seed_genes)
         # Set seeds to NaN so they don't bias results
-        random_final_heat.loc[random_seed_genes]=np.nan
+        random_final_heat.loc[random_seed_genes] = np.nan
         # Add results to random_final_heats matrix
         random_final_heats[repetition] = random_final_heat
 
     # Calculate z-scores
     with warnings.catch_warnings():
-      warnings.simplefilter("ignore")
-      z_scores = (np.log(final_heat) - np.nanmean(np.log(random_final_heats), axis=0)) / np.nanstd(np.log(random_final_heats), axis=0)
+        warnings.simplefilter("ignore")
+        z_scores = (np.log(final_heat) - np.nanmean(np.log(random_final_heats),
+                                                    axis=0)) / np.nanstd(np.log(random_final_heats), axis=0)
 
     return z_scores, final_heat, random_final_heats
+
+
+def calculate_heat_zscores_with_sampling(data, nodes, individual_heats, G_PC, trait="BMI", max_genes=500,
+                                         num_samples=100,
+                                         nominal_sig=0.05, num_reps=1000, out_path="", minimum_bin_size=10):
+    """
+    Takes a set of summary statistics and a molecular interaction and performs sampling of the significant genes.
+    For each sample a random selection of seed genes is chosen, weighted by the p-value of each gene in the summary
+    statistics. Network propagation with zscore calculation is performed for each sample to generate a distribution
+    of z-scores for each gene in the seed_gene set.
+    :param data: Gene level summary statistics
+    :param nodes: list of nodes in the interaction network
+    :param individual_heats: Heat matrix calculated by `netprop_zscore.get_individual_heats_matrix())
+    :param G_PC: molecular interaction network
+    :param trait: name of trait being investigated
+    :param max_genes: Maximum number of seed genes to include in each sample (default=500, maximum=500)
+    :param num_samples: Number of times to perform sampling (default=100)
+    :param nominal_sig: Significance cutoff for keeping genes in data (Note: this value will be Bonferroni corrected)
+    :param num_reps: Number of repetitions of randomization for generating null distribution for z_scores
+    :param out_path: prefix for saving results of sampling
+    :param minimum_bin_size: minimum number of genes that should be in
+            each degree matching bin
+    :type minimum_bin_size: int
+    :return:
+    """
+    assert max_genes <= 500, "NetColoc is only valid for sets of 500 or less genes"
+    outfile = out_path + trait + "sampling_" + str(max_genes) + "_" + str(num_samples) + ".tsv"
+    data = data.loc[data.gene_symbol.isin(nodes)]  # subset to genes in interaction network
+    all_seeds = data.loc[data.pvalue <= nominal_sig / len(data)]  # Bonferroni correction
+    all_seeds = all_seeds.assign(log10p=-1 * np.log10(all_seeds.pvalue))  # get -log10p for weighted sampling
+    sampling_results = []
+    for i in range(num_samples):
+        # perform propagation for sample
+        sample_seeds = rn.choices(population=all_seeds.gene_symbol.values, weights=all_seeds.log10p.values, k=max_genes)
+        sample_results = calculate_heat_zscores(individual_heats, nodes=list(G_PC.nodes), degrees=dict(G_PC.degree),
+                                                seed_genes=sample_seeds, num_reps=num_reps,
+                                                minimum_bin_size=minimum_bin_size, random_seed=i)[0]
+        sample_z = pd.DataFrame(sample_results, columns=["z" + str(i)])
+        # save running results of sampling
+        if i == 0:
+            sample_z.to_csv(outfile, sep="\t")
+        else:
+            existing = pd.read_csv(outfile, sep="\t", index_col=0)
+            existing = existing.join(sample_z)
+            existing.to_csv(outfile, sep="\t")
+        sampling_results.append(sample_z)
+
+    return pd.concat(sampling_results, axis=1)
+
+
+def get_consensus_z_scores(sampled_results, percentile=.75):
+    """
+    returns the consensus z score for each gene across all samples
+    :param sampled_results: output of netprop_zscore.calculate_heat_zscores_with_sampling
+    :type sampled_results: str (file path) or pandas.DataFrame
+    :param percentile: Percentile cut off for determining consensus score (default=0.75)
+    :type percentile: float
+    :return: Consensus z-scores for all genes based on sampling
+    """
+    if type(sampled_results) == str:
+        results = pd.read_csv(sampled_results, sep="\t", index_col=0)
+    else:
+        results = sampled_results
+    consensus_z = pd.DataFrame({'z': results.quantile(q=percentile, axis=1)})
+    return consensus_z
