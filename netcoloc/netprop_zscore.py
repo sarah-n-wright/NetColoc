@@ -14,7 +14,6 @@ from netcoloc.netcoloc_utils import *
 from netcoloc.netprop import *
 import random as rn
 
-
 def netprop_zscore(seed_gene_file, seed_gene_file_delimiter=None, num_reps=10, alpha=0.5, minimum_bin_size=10,
                    interactome_file=None, interactome_uuid='f93f402c-86d4-11e7-a10d-0ac135e8bacf',
                    ndex_server='public.ndexbio.org', ndex_user=None, ndex_password=None, out_name='out',
