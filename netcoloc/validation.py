@@ -11,6 +11,7 @@ import requests
 from mygene import MyGeneInfo
 from scipy.stats import hypergeom
 from statsmodels.stats import contingency_tables
+from os.path import exists
 
 # noinspection PyUnresolvedReferences
 try:
@@ -27,7 +28,8 @@ import mygene
 mg = mygene.MyGeneInfo()
 
 
-def load_MGI_mouseKO_data(url='http://www.informatics.jax.org/downloads/reports/MGI_PhenoGenoMP.rpt'):
+def load_MGI_mouseKO_data(url='http://www.informatics.jax.org/downloads/reports/MGI_PhenoGenoMP.rpt',
+                          map_using="mygeneinfo", update=False):
     """
     Function to parse and load mouse knockout data from MGI.
 
@@ -37,37 +39,63 @@ def load_MGI_mouseKO_data(url='http://www.informatics.jax.org/downloads/reports/
     :rtype: :py:class:`pandas.DataFrame`
     """
     # download MGI phenotype data
-    r = requests.get(url, allow_redirects=True)
-    open('MGI_PhenoGenoMP.rpt', 'wb').write(r.content)
+    if (not exists('MGI_PhenoGenoMP.rpt')) or update:
+        r = requests.get(url, allow_redirects=True)
+        open('MGI_PhenoGenoMP.rpt', 'wb').write(r.content)
 
     # parse the downloaded MGI phenotype data
     mgi_df = pd.read_csv('MGI_PhenoGenoMP.rpt', sep='\t',
                          names=['MGI_Allele_Accession_ID',
                                 'Allele symbol', 'involves',
                                 'MP', 'PMID', 'MGI_marker_accession_ID'])
-    # extract gene names
-    gene_name = [a.split('<')[0] for a in mgi_df['Allele symbol'].tolist()]
-    mgi_df['gene_name'] = gene_name
-    mgi_df.index = mgi_df['gene_name']
+    if map_using == "mygeneinfo":
+        # extract gene names
+        gene_name = [a.split('<')[0] for a in mgi_df['Allele symbol'].tolist()]
+        mgi_df['gene_name'] = gene_name
+        mgi_df.index = mgi_df['gene_name']
+        # map mouse genes to human orthologs
+        mouse_genes = list(np.unique(mgi_df['gene_name']))
+        mg_mapped = mg.querymany(mouse_genes,
+                                 as_dataframe=True, species=['mouse', 'human'],
+                                 scopes='symbol', fields='symbol')
+        # drop genes with no human ortholog
+        print(len(mg_mapped))
+        mg_mapped = mg_mapped.dropna(subset=['symbol'])
+        print(len(mg_mapped))
+        # drop duplicates
+        mg_mapped = mg_mapped[~mg_mapped.index.duplicated(keep='first')]
+        print(len(mg_mapped))
+        mgi_df['human_ortholog'] = mgi_df['gene_name'].map(dict(mg_mapped['symbol']))
+        return mgi_df
 
-    # map mouse genes to human orthologs
-    mouse_genes = list(np.unique(mgi_df['gene_name']))
-    mg_mapped = mg.querymany(mouse_genes,
-                             as_dataframe=True, species=['mouse', 'human'],
-                             scopes='symbol', fields='symbol')
+    elif map_using == "mgi":
+        if not exists('MRK_List2.rpt') or update:
+            keep_url = "http://www.informatics.jax.org/downloads/reports/MRK_List2.rpt"
+            r_map = requests.get(keep_url, allow_redirects=True)
+            open('MRK_List2.rpt', 'wb').write(r_map.content)
+        keep = pd.read_csv('MRK_List2.rpt', sep="\t", usecols=["MGI Accession ID", "Marker Symbol",
+                                                                     "Feature Type", "Marker Name"])
+        keep = keep.loc[keep["Feature Type"].isin(["protein coding gene"])].reset_index(drop=True)
+        mgi_df["MGI"] = mgi_df.MGI_marker_accession_ID.apply(lambda x: x.split("|"))
+        mgi_df = mgi_df.explode("MGI", ignore_index=True)
+        mgi_df["MGI"] = [mg if type(mg) is str else mg[0] for mg in mgi_df.MGI]
+        mgi_df = mgi_df.loc[mgi_df["MGI"].isin(keep["MGI Accession ID"])]
+        mgi_df = mgi_df.merge(keep.loc[:, ("MGI Accession ID", "Marker Symbol")], left_on="MGI",
+                              right_on="MGI Accession ID", how="left")
 
-    # drop genes with no human ortholog
-    print(len(mg_mapped))
-    mg_mapped = mg_mapped.dropna(subset=['symbol'])
-    print(len(mg_mapped))
-    # drop duplicates
-    mg_mapped = mg_mapped[~mg_mapped.index.duplicated(keep='first')]
-    print(len(mg_mapped))
-    mg_mapped.head()
+        if not exists('HMD_HumanPhenotype.rpt') or update:
+            map_url = "http://www.informatics.jax.org/downloads/reports/HMD_HumanPhenotype.rpt"
+            r_map = requests.get(map_url, allow_redirects=True)
+            open('HMD_HumanPhenotype.rpt', 'wb').write(r_map.content)
+        mapping = pd.read_csv('HMD_HumanPhenotype.rpt', sep="\t", header=None, usecols=[0, 2, 3],
+                              index_col=False, names=["symbol", "gene_name", "MGI"])
+        mapping = mapping.loc[mapping["MGI"].isin(keep["MGI Accession ID"])]
 
-    mgi_df['human_ortholog'] = mgi_df['gene_name'].map(dict(mg_mapped['symbol']))
-
-    return mgi_df
+        mg_mapped = mgi_df.merge(mapping, on="MGI", how="left")
+        mg_mapped.loc[mg_mapped.symbol.isna(), "gene_name"] = mg_mapped.loc[mg_mapped.symbol.isna(), "Marker Symbol"]
+        mg_mapped = mg_mapped.drop_duplicates()
+        mg_mapped.rename(columns={"symbol": 'human_ortholog'}, inplace=True)
+        return mg_mapped
 
 
 def load_MPO(url='http://www.informatics.jax.org/downloads/reports/MPheno_OBO.ontology', use_genes=False,
@@ -353,3 +381,15 @@ def MPO_enrichment_full(hier_df, MPO, mgi_df, MP_focal_list, G_int):
             MP_full_results_df = MP_full_results_df.join(MP_focal_df)
 
     return MP_full_results_df
+
+
+if __name__ == "__main__":
+    x = load_MGI_mouseKO_data(map_using="mgi", update=False)
+    x.head()
+    y = load_MGI_mouseKO_data(map_using="mgi", update=False)
+    # Index(['MGI_Allele_Accession_ID', 'Allele symbol', 'involves', 'MP', 'PMID',
+    #        'MGI_marker_accession_ID', 'MGI'],
+    #       dtype='object')
+    #Index(['MGI_Allele_Accession_ID', 'Allele symbol', 'involves', 'MP', 'PMID',
+    #       'MGI_marker_accession_ID', 'gene_name', 'human_ortholog'],
+    #      dtype='object')

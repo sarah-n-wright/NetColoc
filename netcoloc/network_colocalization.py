@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from scipy.spatial import distance
+from tqdm import tqdm
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -407,3 +409,4 @@ def get_p_from_permutation_results(observed, permuted):
     p = norm.sf((observed-np.mean(permuted))/np.std(permuted))
     p = round(p, 4 - int(math.floor(math.log10(abs(p)))) - 1)
     return p
+
