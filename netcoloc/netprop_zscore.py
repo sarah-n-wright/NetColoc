@@ -12,6 +12,7 @@ import ndex2
 # Internal module convenience imports
 from netcoloc.netcoloc_utils import *
 from netcoloc.netprop import *
+import random as rn
 
 
 def netprop_zscore(seed_gene_file, seed_gene_file_delimiter=None, num_reps=10, alpha=0.5, minimum_bin_size=10,
@@ -284,7 +285,8 @@ def calculate_heat_zscores_with_sampling(data, nodes, individual_heats, G_PC, tr
     :type minimum_bin_size: int
     :return:
     """
-    assert max_genes <= 500, "NetColoc is only valid for sets of 500 or less genes"
+    assert max_genes <= 500, "NetColoc is only valid for sets of 500 or less genes so maximum number of genes for " \
+                             "sampling must be <= 500"
     outfile = out_path + trait + "sampling_" + str(max_genes) + "_" + str(num_samples) + ".tsv"
     data = data.loc[data.gene_symbol.isin(nodes)]  # subset to genes in interaction network
     all_seeds = data.loc[data.pvalue <= nominal_sig / len(data)]  # Bonferroni correction
